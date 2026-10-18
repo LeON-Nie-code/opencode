@@ -51,6 +51,21 @@ export function DialogSsh(props: {
     () => ssh.submitting(id) || (state.started && !ssh.error(id) && isSshConnecting(item()?.stage ?? "connecting")),
   )
 
+  const stageMessage = createMemo(() => {
+    switch (item()?.stage) {
+      case "checking":
+        return extension.t("stage.checking")
+      case "downloading":
+        return extension.t("stage.downloading")
+      case "uploading":
+        return extension.t("stage.uploading")
+      case "starting":
+        return extension.t("stage.starting")
+      default:
+        return extension.t("stage.connecting")
+    }
+  })
+
   const prompt = createMemo<SshItem["prompt"]>((previous) => item()?.prompt ?? (busy() ? previous : undefined))
   // A new object for each challenge shown, and when one goes away.
   const challenge = createMemo(on([prompt, () => prompt()?.id], () => ({})))
@@ -178,6 +193,14 @@ export function DialogSsh(props: {
               />
             </div>
           </Show>
+          <Show when={busy() && !prompt()}>
+            <div class="flex w-full min-w-0 flex-col gap-2" role="status" aria-live="polite">
+              <span class="text-14-medium text-v2-text-text-base">{stageMessage()}</span>
+              <Show when={item()?.stage === "downloading" || item()?.stage === "uploading"}>
+                <span class="text-13-regular text-v2-text-text-muted">{extension.t("stage.installHint")}</span>
+              </Show>
+            </div>
+          </Show>
           <Show when={item()?.stage === "incompatible"}>
             <div class="flex w-full min-w-0 flex-col gap-2" role="status" aria-live="polite">
               <span class="text-14-medium text-v2-text-text-base">{extension.t("stage.incompatible")}</span>
@@ -247,7 +270,7 @@ export function DialogSsh(props: {
               onClick={() => start(item()?.stage === "incompatible")}
             >
               {busy()
-                ? extension.t("stage.connecting")
+                ? stageMessage()
                 : item()?.stage === "incompatible"
                   ? extension.t("update")
                   : props.config
