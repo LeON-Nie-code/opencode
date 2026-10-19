@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Cause, Deferred, Effect, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { Agent } from "@opencode/core/agent"
 import { Database } from "@opencode/core/database/database"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
@@ -24,12 +24,11 @@ const current = Layer.succeed(
   Location.Service,
   Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
 )
-const it = testEffect(
-  AppNodeBuilder.build(
-    LayerNode.group([Database.node, Bus.node, SessionStore.node, PermissionSaved.node, Agent.node, Permission.node]),
-    [Location.node.replace(current)],
-  ),
+const nodeLayer = AppNodeBuilder.build(
+  LayerNode.group([Database.node, Bus.node, SessionStore.node, PermissionSaved.node, Agent.node, Permission.node]),
+  [Location.node.replace(current)],
 )
+const it = testEffect(nodeLayer)
 
 function setup(rules: Permission.Ruleset = [], sessionID = Session.ID.make("ses_test")) {
   return Effect.gen(function* () {
@@ -415,6 +414,31 @@ describe("Permission", () => {
       }),
     )
   }
+
+  it.effect("declines pending requests when its scope closes", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const context = yield* Layer.buildWithScope(Layer.fresh(nodeLayer), scope)
+      const { service, fiber, request } = yield* Effect.gen(function* () {
+        yield* setup()
+        return yield* waitForRequest()
+      }).pipe(Effect.provide(context))
+
+      expect(yield* service.list()).toEqual([request])
+
+      yield* Scope.close(scope, Exit.void)
+
+      const exit = yield* Fiber.await(fiber)
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure")
+        expect(
+          exit.cause.reasons.some(
+            (reason) => Cause.isDieReason(reason) && reason.defect instanceof Permission.DeclinedError,
+          ),
+        ).toBe(true)
+      expect(yield* service.list()).toEqual([])
+    }),
+  )
 })
 
 describe("shell scanner permission impact", () => {
